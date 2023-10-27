@@ -1,0 +1,117 @@
+%%writefile smoothImage.cu //new
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
+
+#include <stdio.h>
+#include <cuda_runtime.h>
+
+__device__ int clamp(int value, int mmin, int mmax) {
+    return max(mmin, min(mmax, value));
+}
+
+//smoothing kernel is replacing these loops
+// Iterate over neighboring pixels
+//                for (int ky = -smoothing_size/2; ky <= smoothing_size/2; ++ky) 
+//                    for (int kx = -smoothing_size/2; kx <= smoothing_size/2; ++kx) 
+
+__global__ void smoothingKernel(int width, int height, int channels, int smoothing_size, unsigned char* img, unsigned char* output) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    while (x < width) {
+
+        while (y < height) {
+            int pos = (y * width + x) * channels;
+
+            int r = 0;
+            int g = 0;
+            int b = 0;
+
+            int count = 0;
+
+            for (int i = -smoothing_size; i <= smoothing_size; i++) {
+                for (int j = -smoothing_size; j <= smoothing_size; j++) {
+                    int nx = clamp(x + i, 0, width - 1);
+                    int ny = clamp(y + j, 0, height - 1);
+                    int neighborPos = (ny * width + nx) * channels;
+
+                    r += img[neighborPos];
+                    g += img[neighborPos + 1];
+                    b += img[neighborPos + 2];
+
+                    count++;
+                }
+            }
+
+            r /= count;
+            g /= count;
+            b /= count;
+
+            output[pos] = r;
+            output[pos + 1] = g;
+            output[pos + 2] = b;
+
+            y += gridDim.y * blockDim.y;
+        }
+        x += gridDim.x * blockDim.x;
+    }
+}
+
+
+int main() {
+    int width, height, channels;
+    unsigned char* img = stbi_load("apple.jpg", &width, &height, &channels, 0);
+    int smoothing_size = 7; //(e.x, 3, 5, 7)
+
+    if (!img) {
+        printf("Failed to load image\n");
+        return 1;
+    }
+
+    unsigned char* output = (unsigned char*)malloc(width * height * channels);
+
+    unsigned char* imgD;
+    unsigned char* outputD;
+
+    cudaMalloc(&imgD, sizeof(unsigned char) * width * height * channels);
+    cudaMalloc(&outputD, sizeof(unsigned char) * width * height * channels);
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        printf("CUDA error: %s\n", cudaGetErrorString(err));
+    }
+
+    if (!output) {
+        printf("Failed to allocate memory for the output image\n");
+        stbi_image_free(img);
+        return 1;
+    }
+
+    cudaMemcpy(imgD, img, sizeof(unsigned char) * width * height * channels, cudaMemcpyHostToDevice);
+
+    dim3 threadsPerBlock(16, 16); 
+    dim3 blockDim((width + threadsPerBlock.x - 1) / threadsPerBlock.x, (height + threadsPerBlock.y - 1) / threadsPerBlock.y);
+
+    smoothingKernel<<<blockDim, threadsPerBlock>>>(width, height, channels, smoothing_size, imgD, outputD);
+
+    err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        printf("CUDA error: %s\n", cudaGetErrorString(err));
+    }
+
+    cudaMemcpy(output, outputD, sizeof(unsigned char) * width * height * channels, cudaMemcpyDeviceToHost);
+
+    stbi_write_jpg("smoothed_image.jpg", width, height, channels, output, 100);
+
+    free(output);
+    stbi_image_free(img);
+    cudaFree(imgD);
+    cudaFree(outputD);
+
+    printf("Image processing completed. Check smoothed_image.jpg.\n");
+    return 0;
+}
+

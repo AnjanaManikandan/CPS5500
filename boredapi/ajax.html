@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Fetch Test</title>
+</head>
+<body>
+    <h1>Fetch Test async</h1>
+    <button id="fetchButton">Fetch Data</button>
+    <div id="result"></div>
+
+    <script>
+        async function testFetchAsync() {
+            try {
+                let response = await fetch('http://www.boredapi.com/api/activity');
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                const json = await response.json();
+                document.getElementById('result').innerHTML = "We got it: " + json.activity;
+            } catch (error) {
+                document.getElementById('result').innerHTML = "We failed with: " + error;
+            }
+        }
+
+        document.getElementById('fetchButton').addEventListener('click', testFetchAsync);
+    </script>
+</body>
+</html>

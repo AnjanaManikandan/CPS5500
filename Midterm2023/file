@@ -1,0 +1,93 @@
+%%writefile smoothImage.cu
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
+
+#include <stdio.h>
+#include <cuda.h>
+
+
+__device__ int clamp(int value, int mmin, int mmax) {
+    return max(mmin, min(mmax, value));
+}
+
+
+__global__ void smoothingKernel(int width, int height, int channels, int smoothing_size, unsigned char * img, unsigned char * output){
+
+    int x = threadIdx.x + blockIdx.x * blockDim.x;
+
+    while(x<width) {
+
+        int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+        while(y<height){
+            // do stuff here
+
+            y += gridDim.y * blockDim.y;
+        }
+
+        x += gridDim.x * gridDim.x;
+    }
+
+}
+
+
+
+int main() {
+    int width, height, channels;
+    unsigned char* img = stbi_load("apple.jpg", &width, &height, &channels, 0);
+    int smoothing_size = 7; //(should be 3,5,7,...)
+
+    if (!img) {
+        printf("Failed to load image\n");
+        return 1;
+    }
+
+
+    unsigned char* output = (unsigned char*)malloc(width * height * channels);
+
+
+    unsigned char* imgD;
+    unsigned char* outputD;
+
+    cudaMalloc(&imgD, sizeof(unsigned char)*width * height * channels);
+    cudaMalloc(&outputD, sizeof(unsigned char)*width * height * channels);
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        printf("CUDA error: %s\n", cudaGetErrorString(err));
+    }
+
+    if (!output) {
+        printf("Failed to allocate memory for output image\n");
+        stbi_image_free(img);
+        return 1;
+    }
+
+    cudaMemcpy(imgD, img, sizeof(unsigned char) * width * height * channels, cudaMemcpyHostToDevice);
+
+    dim3 threadsPerBlock(8,8);
+    dim3 blockDim(width/threadsPerBlock.x+1, height/threadsPerBlock.y+1);
+
+    smoothingKernel<<<blockDim, threadsPerBlock>>>(width, height, channels, smoothing_size, imgD, outputD);
+
+    err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        printf("CUDA error: %s\n", cudaGetErrorString(err));
+    }
+
+    cudaMemcpy(output, outputD, sizeof(unsigned char) * width * height * channels, cudaMemcpyDeviceToHost);
+
+    stbi_write_jpg("smoothed_image.jpg", width, height, channels, output, 100);
+
+    free(output);
+    stbi_image_free(img);
+    cudaFree(imgD);
+    cudaFree(outputD);
+
+    printf("Image processing completed. Check smoothed_image.jpg.\n");
+    return 0;
+}
+
